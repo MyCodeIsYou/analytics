@@ -1,4 +1,5 @@
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright-core";
+import { launchBrowser, onVercel } from "./browser";
 import { AutomationError } from "./errors";
 import { getSite } from "./registry";
 
@@ -40,12 +41,10 @@ function maxSessions() {
 async function browser() {
   const current = store();
   if (!current.browser) {
-    current.browser = chromium
-      .launch({ headless: process.env.PLAYWRIGHT_HEADLESS !== "false" })
-      .catch((error: unknown) => {
-        current.browser = null;
-        throw error;
-      });
+    current.browser = launchBrowser().catch((error: unknown) => {
+      current.browser = null;
+      throw error;
+    });
   }
   return current.browser;
 }
@@ -65,6 +64,13 @@ function ensureSweeper() {
 }
 
 export async function openSession(siteId: string): Promise<AutomationSession> {
+  if (onVercel()) {
+    throw new AutomationError(
+      "use_run",
+      "Vercel에서는 브라우저 세션을 유지할 수 없습니다. POST /api/automation/run 을 사용하세요.",
+      400,
+    );
+  }
   const site = getSite(siteId);
   const current = store();
   if (current.sessions.size >= maxSessions()) {

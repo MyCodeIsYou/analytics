@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install",
+  "functions": {
+    "src/app/api/automation/run/route.ts": {
+      "maxDuration": 60,
+      "memory": 1769
+    }
+  }
+}

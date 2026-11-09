@@ -1,7 +1,8 @@
 const endpoints = [
   ["GET", "/api/health", "서버 상태"],
   ["GET", "/api/automation/sites", "등록된 사이트와 동작 목록"],
-  ["POST", "/api/automation/sessions", "브라우저 세션 열기. body: { site }"],
+  ["POST", "/api/automation/run", "한 요청으로 로그인 후 조회 또는 등록. Vercel에서는 이 경로를 사용"],
+  ["POST", "/api/automation/sessions", "브라우저 세션 열기. 상시 서버 전용. body: { site }"],
   ["GET", "/api/automation/sessions/:id", "세션 상태"],
   ["DELETE", "/api/automation/sessions/:id", "세션 종료"],
   ["POST", "/api/automation/sessions/:id/login", "로그인. body: { username, password }"],
@@ -13,7 +14,7 @@ export default function Home() {
   return (
     <main style={{ maxWidth: 760, margin: "40px auto", padding: "0 20px", lineHeight: 1.6 }}>
       <h1>analytics</h1>
-      <p>다른 사이트에 로그인하고 조회·등록하는 Playwright 백엔드입니다.</p>
+      <p>다른 사이트에 로그인하고 조회·등록하는 Playwright 백엔드입니다. Vercel에서는 브라우저를 요청마다 열고 닫는 /api/automation/run 을 사용합니다.</p>
       <ul>
         {endpoints.map(([method, path, description]) => (
           <li key={path}>
