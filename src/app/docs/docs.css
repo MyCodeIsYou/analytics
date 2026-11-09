@@ -1,0 +1,14 @@
+.docs-root {
+  width: 100%;
+  min-height: 100vh;
+  background: #fff;
+  color: #3b4151;
+}
+
+.docs-root .swagger-ui {
+  background: #fff;
+}
+
+.docs-root .swagger-ui a {
+  color: #4990e2;
+}
