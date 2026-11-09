@@ -3,7 +3,10 @@ import { AutomationError } from "@/lib/automation/errors";
 import type { SiteAdapter } from "@/lib/automation/types";
 
 const ORIGIN = "https://www.xn--lu5b7kx8m.kr";
-const NOTIFY_URL = `${ORIGIN}/ms/public/notify.do`;
+const SITE_PAGES = [
+  { id: "notify", name: "공지", url: `${ORIGIN}/ms/public/notify.do` },
+  { id: "driving", name: "차량운행일지", url: `${ORIGIN}/ms/driving.do` },
+];
 
 async function postForm(page: Page, path: string, fields: Record<string, string>) {
   return page.evaluate(
@@ -82,7 +85,7 @@ async function notices(page: Page) {
   }));
 }
 
-async function openHome(page: Page) {
+async function openSitePage(page: Page, target: { id: string; name: string; url: string }) {
   const network: Array<{ url: string; status: number; data: unknown }> = [];
   const onResponse = async (response: Response) => {
     const type = response.request().resourceType();
@@ -109,7 +112,7 @@ async function openHome(page: Page) {
   page.on("response", onResponse);
   try {
     try {
-      await page.goto(NOTIFY_URL, { waitUntil: "domcontentloaded" });
+      await page.goto(target.url, { waitUntil: "domcontentloaded" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (!message.includes("ERR_ABORTED")) throw error;
@@ -120,13 +123,13 @@ async function openHome(page: Page) {
 
     const landed = page.url();
     if (landed.includes("init.go") || landed.includes("LOGIN_NEED") || landed.includes("forward.go")) {
-      throw new AutomationError("navigation_failed", "로그인 후 공지 화면으로 이동하지 못했습니다.", 502);
+      throw new AutomationError("navigation_failed", `${target.name} 화면으로 이동하지 못했습니다.`, 502);
     }
 
     const view = await page.evaluate(() => {
       document.querySelectorAll("nav li, aside li, #left-panel li").forEach((item) => {
         const child = item.querySelector(":scope > ul");
-        if (!child) return;
+        if (!(child instanceof HTMLElement)) return;
         item.classList.add("open", "active");
         child.style.display = "block";
       });
@@ -149,13 +152,29 @@ async function openHome(page: Page) {
     });
 
     if (view.html.length > 2_000_000) {
-      throw new AutomationError("payload_too_large", "공지 화면이 너무 커서 가져오지 못했습니다.", 502);
+      throw new AutomationError("payload_too_large", `${target.name} 화면이 너무 커서 가져오지 못했습니다.`, 502);
     }
 
-    return { ...view, network: network.slice(-30) };
+    return { id: target.id, name: target.name, ...view, network: network.slice(-30) };
   } finally {
     page.off("response", onResponse);
   }
+}
+
+async function openHome(page: Page) {
+  const pages = [];
+  for (const target of SITE_PAGES) {
+    try {
+      pages.push(await openSitePage(page, target));
+    } catch (error) {
+      pages.push({
+        id: target.id,
+        name: target.name,
+        error: error instanceof Error && error.message ? error.message : `${target.name} 화면을 열지 못했습니다.`,
+      });
+    }
+  }
+  return { pages };
 }
 
 export const chookjeongin: SiteAdapter = {

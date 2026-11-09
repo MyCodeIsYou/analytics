@@ -73,6 +73,19 @@ export const apiCatalog: ApiEntry[] = [
     successDescription: "공지 데이터",
     successExample: {},
   },
+  {
+    order: 3,
+    operationId: "driving",
+    method: "get",
+    path: "/ms/driving.do",
+    server: "https://www.xn--lu5b7kx8m.kr",
+    summary: "차량운행일지",
+    description:
+      "로그인된 브라우저가 차량운행일지 메뉴로 이동하는 주소입니다. 1번 로그인 뒤에 공지 화면과 같은 방식으로 열고, 화면과 그 페이지가 받은 응답을 가져옵니다.",
+    security: [],
+    successDescription: "차량운행일지 화면",
+    successExample: {},
+  },
 ];
 
 const errorSchema = {

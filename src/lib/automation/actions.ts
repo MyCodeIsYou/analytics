@@ -72,19 +72,23 @@ export async function runJob(body: Record<string, unknown>) {
       if (!loggedIn) {
         throw new AutomationError("invalid_body", "로그인하려면 username 과 password 가 필요합니다.");
       }
-      let screen: Record<string, unknown> | undefined;
-      let screenError: string | undefined;
-      if (site.openHome) {
-        try {
-          screen = await site.openHome(page);
-        } catch (error) {
-          screenError = error instanceof Error && error.message ? error.message : "공지 화면을 열지 못했습니다.";
-        }
-      }
+      const opened = site.openHome ? await site.openHome(page) : undefined;
+      const pages = Array.isArray(opened?.pages) ? opened.pages : [];
+      const screen = pages.find(
+        (item) => item && typeof item === "object" && "html" in item && typeof item.html === "string" && item.html,
+      );
+      const failed = pages.filter(
+        (item) => item && typeof item === "object" && "error" in item && typeof item.error === "string",
+      );
+      const screenError =
+        !screen && failed.length > 0
+          ? failed.map((item) => `${"name" in item ? item.name : "화면"}: ${item.error}`).join("\n")
+          : undefined;
       return {
         action,
         loggedIn,
         message: "로그인되었습니다.",
+        ...(pages.length > 0 ? { pages } : {}),
         ...(screen ? { screen } : {}),
         ...(screenError ? { screenError } : {}),
       };
