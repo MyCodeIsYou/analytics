@@ -118,6 +118,12 @@ async function openHome(page: Page) {
     }
 
     const view = await page.evaluate(() => {
+      document.querySelectorAll("nav li, aside li, #left-panel li").forEach((item) => {
+        const child = item.querySelector(":scope > ul");
+        if (!child) return;
+        item.classList.add("open", "active");
+        child.style.display = "block";
+      });
       document.querySelectorAll("script").forEach((node) => node.remove());
       document.querySelectorAll("*").forEach((node) => {
         [...node.attributes].forEach((attribute) => {
