@@ -108,7 +108,13 @@ async function openHome(page: Page) {
 
   page.on("response", onResponse);
   try {
-    await page.goto(NOTIFY_URL, { waitUntil: "domcontentloaded" });
+    try {
+      await page.goto(NOTIFY_URL, { waitUntil: "domcontentloaded" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (!message.includes("ERR_ABORTED")) throw error;
+      await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+    }
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
     await page.waitForTimeout(1_000);
 
