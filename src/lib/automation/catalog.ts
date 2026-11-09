@@ -86,6 +86,47 @@ export const apiCatalog: ApiEntry[] = [
     successDescription: "차량운행일지 화면",
     successExample: {},
   },
+  {
+    order: 4,
+    operationId: "drivingSearch",
+    method: "post",
+    path: "/api/automation/run",
+    summary: "차량운행일지 조회",
+    description:
+      "차량운행일지 화면에서 검색을 누를 때 호출합니다. 운행일, 측정분야, 차량번호, 사용인력, 차량운행일지에 값이 있는 칸만 input.fields 로 보내고, 로그인된 브라우저가 그 값을 같은 칸에 넣은 뒤 검색을 누릅니다. id 와 name 은 화면 입력칸의 값 그대로입니다.",
+    body: {
+      required: ["site", "action", "operation", "username", "password", "input"],
+      properties: {
+        site: { type: "string", description: "사이트 아이디. 측정인은 chookjeongin" },
+        action: { type: "string", enum: ["query"], description: "조회" },
+        operation: { type: "string", enum: ["driving"], description: "차량운행일지 조회" },
+        username: { type: "string", description: "측정인 아이디" },
+        password: { type: "string", description: "측정인 비밀번호" },
+        input: {
+          type: "object",
+          description: "fields 배열. 각 항목은 화면 입력칸의 id, name, value 이고 값이 있는 칸만 포함합니다.",
+        },
+      },
+      example: {
+        site: "chookjeongin",
+        action: "query",
+        operation: "driving",
+        username: "user@example.com",
+        password: "password",
+        input: {
+          fields: [{ id: "field-id", name: "field-name", value: "12가3456" }],
+        },
+      },
+    },
+    security: [{ bearerAuth: [] }],
+    successDescription: "조회된 차량운행일지 화면",
+    successExample: {
+      ok: true,
+      action: "query",
+      operation: "driving",
+      loggedIn: true,
+    },
+  },
 ];
 
 const errorSchema = {
@@ -101,11 +142,17 @@ export function openApiDocument() {
   const paths: Record<string, Record<string, unknown>> = {};
 
   for (const entry of [...apiCatalog].sort((a, b) => a.order - b.order)) {
+    let documentedPath = entry.path;
+    if (paths[documentedPath]?.[entry.method]) documentedPath = `${entry.path}/${entry.operationId}`;
+    const description =
+      documentedPath === entry.path
+        ? entry.description
+        : `실제 요청 경로는 ${entry.method.toUpperCase()} ${entry.path} 입니다. ${entry.description}`;
     const operation: Record<string, unknown> = {
       tags: [`${entry.order}. ${entry.summary}`],
       operationId: entry.operationId,
       summary: `${entry.order}. ${entry.summary}`,
-      description: entry.description,
+      description,
       security: entry.security ?? [{ bearerAuth: [] }],
       ...(entry.server ? { servers: [{ url: entry.server }] } : {}),
       responses: {
@@ -164,9 +211,9 @@ export function openApiDocument() {
       };
     }
 
-    const current = paths[entry.path] ?? {};
+    const current = paths[documentedPath] ?? {};
     current[entry.method] = operation;
-    paths[entry.path] = current;
+    paths[documentedPath] = current;
   }
 
   return {

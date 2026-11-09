@@ -1,6 +1,7 @@
-import type { Page, Response } from "playwright";
+import type { Dialog, Page, Response } from "playwright";
 import { AutomationError } from "@/lib/automation/errors";
 import type { SiteAdapter } from "@/lib/automation/types";
+import { applyDrivingFields, clickDrivingSearch, type DrivingField } from "@/sites/drivingForm";
 
 const ORIGIN = "https://www.xn--lu5b7kx8m.kr";
 const SITE_PAGES = [
@@ -85,7 +86,32 @@ async function notices(page: Page) {
   }));
 }
 
-async function openSitePage(page: Page, target: { id: string; name: string; url: string }) {
+function captureDocument() {
+  document.querySelectorAll("nav li, aside li, #left-panel li").forEach((item) => {
+    const child = item.querySelector(":scope > ul");
+    if (!(child instanceof HTMLElement)) return;
+    item.classList.add("open", "active");
+    child.style.display = "block";
+  });
+  document.querySelectorAll("script").forEach((node) => node.remove());
+  document.querySelectorAll("*").forEach((node) => {
+    [...node.attributes].forEach((attribute) => {
+      if (attribute.name.toLowerCase().startsWith("on")) node.removeAttribute(attribute.name);
+    });
+  });
+  if (!document.querySelector("base")) {
+    const base = document.createElement("base");
+    base.href = `${location.origin}/`;
+    document.head.prepend(base);
+  }
+  return {
+    url: location.href,
+    title: document.title,
+    html: document.documentElement.outerHTML,
+  };
+}
+
+function watchNetwork(page: Page) {
   const network: Array<{ url: string; status: number; data: unknown }> = [];
   const onResponse = async (response: Response) => {
     const type = response.request().resourceType();
@@ -108,56 +134,121 @@ async function openSitePage(page: Page, target: { id: string; name: string; url:
       // The body can already be consumed by the page.
     }
   };
-
   page.on("response", onResponse);
+  return {
+    network,
+    stop() {
+      page.off("response", onResponse);
+    },
+  };
+}
+
+async function gotoDocument(page: Page, url: string, name: string) {
   try {
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!message.includes("ERR_ABORTED")) throw error;
+    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+  }
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForTimeout(1_000);
+  const landed = page.url();
+  if (landed.includes("init.go") || landed.includes("LOGIN_NEED") || landed.includes("forward.go")) {
+    throw new AutomationError("navigation_failed", `${name} 화면으로 이동하지 못했습니다.`, 502);
+  }
+}
+
+async function readDocument(page: Page, name: string) {
+  const view = await page.evaluate(captureDocument);
+  if (view.html.length > 2_000_000) {
+    throw new AutomationError("payload_too_large", `${name} 화면이 너무 커서 가져오지 못했습니다.`, 502);
+  }
+  return view;
+}
+
+async function openSitePage(page: Page, target: { id: string; name: string; url: string }) {
+  const watch = watchNetwork(page);
+  try {
+    await gotoDocument(page, target.url, target.name);
+    const view = await readDocument(page, target.name);
+    return { id: target.id, name: target.name, ...view, network: watch.network.slice(-30) };
+  } finally {
+    watch.stop();
+  }
+}
+
+function drivingFields(input: Record<string, unknown>): DrivingField[] {
+  if (!Array.isArray(input.fields)) return [];
+  const fields: DrivingField[] = [];
+  for (const item of input.fields) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const value = typeof record.value === "string" ? record.value.trim() : "";
+    const id = typeof record.id === "string" ? record.id : "";
+    const name = typeof record.name === "string" ? record.name : "";
+    if (!value || value.length > 500 || (!id && !name)) continue;
+    fields.push({ id, name, value });
+  }
+  return fields.slice(0, 40);
+}
+
+function blocksSearch(message: string) {
+  return /입력|선택|오류|실패|기간|확인/.test(message);
+}
+
+async function searchDriving(page: Page, input: Record<string, unknown>) {
+  const fields = drivingFields(input);
+  const watch = watchNetwork(page);
+  let dialogMessage = "";
+  const onDialog = (dialog: Dialog) => {
+    dialogMessage = dialog.message();
+    return dialog.accept();
+  };
+  page.on("dialog", onDialog);
+  try {
+    await gotoDocument(page, `${ORIGIN}/ms/driving.do`, "차량운행일지");
+    if (fields.length > 0) await page.evaluate(applyDrivingFields, fields);
+    const pending = page
+      .waitForResponse(
+        (response) => {
+          const type = response.request().resourceType();
+          return type === "xhr" || type === "fetch";
+        },
+        { timeout: 12_000 },
+      )
+      .catch(() => null);
+    let clicked = false;
     try {
-      await page.goto(target.url, { waitUntil: "domcontentloaded" });
+      clicked = await page.evaluate(clickDrivingSearch);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      if (!message.includes("ERR_ABORTED")) throw error;
-      await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+      if (!message.includes("Execution context was destroyed") && !message.includes("ERR_ABORTED")) throw error;
+      clicked = true;
     }
+    if (!clicked) throw new AutomationError("search_failed", "검색 버튼을 찾지 못했습니다.", 502);
+    await pending;
+    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
     await page.waitForTimeout(1_000);
-
+    if (dialogMessage && blocksSearch(dialogMessage)) {
+      throw new AutomationError("search_failed", dialogMessage, 422);
+    }
     const landed = page.url();
     if (landed.includes("init.go") || landed.includes("LOGIN_NEED") || landed.includes("forward.go")) {
-      throw new AutomationError("navigation_failed", `${target.name} 화면으로 이동하지 못했습니다.`, 502);
+      throw new AutomationError("navigation_failed", "차량운행일지 조회 화면으로 이동하지 못했습니다.", 502);
     }
-
-    const view = await page.evaluate(() => {
-      document.querySelectorAll("nav li, aside li, #left-panel li").forEach((item) => {
-        const child = item.querySelector(":scope > ul");
-        if (!(child instanceof HTMLElement)) return;
-        item.classList.add("open", "active");
-        child.style.display = "block";
-      });
-      document.querySelectorAll("script").forEach((node) => node.remove());
-      document.querySelectorAll("*").forEach((node) => {
-        [...node.attributes].forEach((attribute) => {
-          if (attribute.name.toLowerCase().startsWith("on")) node.removeAttribute(attribute.name);
-        });
-      });
-      if (!document.querySelector("base")) {
-        const base = document.createElement("base");
-        base.href = `${location.origin}/`;
-        document.head.prepend(base);
-      }
-      return {
-        url: location.href,
-        title: document.title,
-        html: document.documentElement.outerHTML,
-      };
-    });
-
-    if (view.html.length > 2_000_000) {
-      throw new AutomationError("payload_too_large", `${target.name} 화면이 너무 커서 가져오지 못했습니다.`, 502);
-    }
-
-    return { id: target.id, name: target.name, ...view, network: network.slice(-30) };
+    const view = await readDocument(page, "차량운행일지");
+    return {
+      id: "driving",
+      name: "차량운행일지",
+      ...view,
+      network: watch.network.slice(-30),
+      ...(dialogMessage ? { notice: dialogMessage } : {}),
+    };
   } finally {
-    page.off("response", onResponse);
+    page.off("dialog", onDialog);
+    watch.stop();
   }
 }
 
@@ -191,6 +282,11 @@ export const chookjeongin: SiteAdapter = {
       name: "notices",
       description: "상단 알림 공지 목록",
       requiresLogin: false,
+    },
+    {
+      name: "driving",
+      description: "차량운행일지 조회. input.fields 에 운행일, 측정분야, 차량번호, 사용인력, 차량운행일지 값이 있으면 넣고 검색합니다.",
+      requiresLogin: true,
     },
   ],
   registerOperations: [],
@@ -226,6 +322,7 @@ export const chookjeongin: SiteAdapter = {
   async query(page, operation, input) {
     if (operation === "companies") return companies(page, input);
     if (operation === "notices") return notices(page);
+    if (operation === "driving") return searchDriving(page, input);
     throw new AutomationError("unknown_operation", `조회 동작 '${operation}' 은 없습니다.`);
   },
   async register(_page, operation) {
