@@ -1,7 +1,30 @@
 import { NextResponse } from "next/server";
 import { AutomationError } from "./errors";
 
+const PAGE_ORIGINS = new Set([
+  "https://mycodeisyou.github.io",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
+
+export function isPageOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  return Boolean(origin && PAGE_ORIGINS.has(origin));
+}
+
+export function applyCors(request: Request, response: NextResponse) {
+  const origin = request.headers.get("origin");
+  if (!origin || !PAGE_ORIGINS.has(origin)) return response;
+  response.headers.set("Access-Control-Allow-Origin", origin);
+  response.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  response.headers.set("Access-Control-Max-Age", "86400");
+  response.headers.set("Vary", "Origin");
+  return response;
+}
+
 export function authorize(request: Request): NextResponse | null {
+  if (isPageOrigin(request)) return null;
   const configured = process.env.AUTOMATION_API_KEY?.trim();
   const header = request.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
@@ -67,8 +90,13 @@ export async function run(action: () => Promise<Record<string, unknown>>) {
       );
     }
     console.error(error);
+    const detail = error instanceof Error ? error.message.trim() : "";
     return NextResponse.json(
-      { ok: false, code: "internal", message: "처리 중 오류가 발생했습니다." },
+      {
+        ok: false,
+        code: "internal",
+        message: detail ? detail.slice(0, 300) : "처리 중 오류가 발생했습니다.",
+      },
       { status: 500 },
     );
   }
