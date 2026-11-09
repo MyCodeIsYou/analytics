@@ -23,6 +23,7 @@ export type SiteAdapter = {
   queryOperations: SiteOperation[];
   registerOperations: SiteOperation[];
   login: (page: Page, credentials: Credentials) => Promise<LoginResult>;
+  openHome?: (page: Page) => Promise<Record<string, unknown>>;
   query: (page: Page, operation: string, input: Record<string, unknown>) => Promise<unknown>;
   register: (page: Page, operation: string, input: Record<string, unknown>) => Promise<unknown>;
 };

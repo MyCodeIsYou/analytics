@@ -1,8 +1,9 @@
-import type { Page } from "playwright";
+import type { Page, Response } from "playwright";
 import { AutomationError } from "@/lib/automation/errors";
 import type { SiteAdapter } from "@/lib/automation/types";
 
 const ORIGIN = "https://www.xn--lu5b7kx8m.kr";
+const NOTIFY_URL = `${ORIGIN}/ms/public/notify.do`;
 
 async function postForm(page: Page, path: string, fields: Record<string, string>) {
   return page.evaluate(
@@ -81,6 +82,70 @@ async function notices(page: Page) {
   }));
 }
 
+async function openHome(page: Page) {
+  const network: Array<{ url: string; status: number; data: unknown }> = [];
+  const onResponse = async (response: Response) => {
+    const type = response.request().resourceType();
+    if (type !== "xhr" && type !== "fetch") return;
+    const contentType = response.headers()["content-type"] ?? "";
+    if (!contentType.includes("json") && !contentType.includes("text/plain") && !contentType.includes("text/html")) {
+      return;
+    }
+    try {
+      const text = await response.text();
+      if (!text || text.length > 400_000) return;
+      let data: unknown = text;
+      try {
+        data = JSON.parse(text) as unknown;
+      } catch {
+        data = text.slice(0, 20_000);
+      }
+      network.push({ url: response.url().split("?")[0], status: response.status(), data });
+    } catch {
+      // The body can already be consumed by the page.
+    }
+  };
+
+  page.on("response", onResponse);
+  try {
+    await page.goto(NOTIFY_URL, { waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_000);
+
+    const landed = page.url();
+    if (landed.includes("init.go") || landed.includes("LOGIN_NEED") || landed.includes("forward.go")) {
+      throw new AutomationError("navigation_failed", "로그인 후 공지 화면으로 이동하지 못했습니다.", 502);
+    }
+
+    const view = await page.evaluate(() => {
+      document.querySelectorAll("script").forEach((node) => node.remove());
+      document.querySelectorAll("*").forEach((node) => {
+        [...node.attributes].forEach((attribute) => {
+          if (attribute.name.toLowerCase().startsWith("on")) node.removeAttribute(attribute.name);
+        });
+      });
+      if (!document.querySelector("base")) {
+        const base = document.createElement("base");
+        base.href = `${location.origin}/`;
+        document.head.prepend(base);
+      }
+      return {
+        url: location.href,
+        title: document.title,
+        html: document.documentElement.outerHTML,
+      };
+    });
+
+    if (view.html.length > 2_000_000) {
+      throw new AutomationError("payload_too_large", "공지 화면이 너무 커서 가져오지 못했습니다.", 502);
+    }
+
+    return { ...view, network: network.slice(-30) };
+  } finally {
+    page.off("response", onResponse);
+  }
+}
+
 export const chookjeongin: SiteAdapter = {
   id: "chookjeongin",
   name: "측정인",
@@ -98,6 +163,7 @@ export const chookjeongin: SiteAdapter = {
     },
   ],
   registerOperations: [],
+  openHome,
   async login(page, credentials) {
     await page.goto(this.startUrl, { waitUntil: "domcontentloaded" });
     await page.locator("#user_email").fill(credentials.username);

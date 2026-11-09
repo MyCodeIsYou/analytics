@@ -72,7 +72,8 @@ export async function runJob(body: Record<string, unknown>) {
       if (!loggedIn) {
         throw new AutomationError("invalid_body", "로그인하려면 username 과 password 가 필요합니다.");
       }
-      return { action, loggedIn, message: "로그인되었습니다." };
+      const screen = site.openHome ? await site.openHome(page) : undefined;
+      return { action, loggedIn, message: "로그인되었습니다.", ...(screen ? { screen } : {}) };
     }
 
     const operation = typeof body.operation === "string" ? body.operation.trim() : "";
